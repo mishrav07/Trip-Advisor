@@ -1,10 +1,10 @@
 import os
-import requests
 import re
 
-import certifi
 import airportsdata
+import certifi
 import pycountry
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
