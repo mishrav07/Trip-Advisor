@@ -1,5 +1,5 @@
 # Dockerfile to add the necessary dependencies for the project
-FROM python:3.9-slim
+FROM python:3.11-slim
 # Set the working directory
 WORKDIR /app
 # Copy the requirements file into the container
