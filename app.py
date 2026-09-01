@@ -15,6 +15,12 @@ from tools.backend import (
     run_travel_agent,
 )
 
+# Importing the run_travel_agent function from tools.backend to handle travel planning requests in the FastAPI application.
+import nest_asyncio
+
+nest_asyncio.apply()
+
+
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(

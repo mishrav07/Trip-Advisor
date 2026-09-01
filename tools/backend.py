@@ -30,7 +30,10 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_groq import ChatGroq
-from tools.tavily_tool import tavily_search
+# from tools.tavily_tool import tavily_search
+# Commmeting the tavily search import because we are now using the MCP client to access the tavily_search tool.
+
+from mcp_clients import tavily_mcp_search
 from tools.flight_tool import search_flights
 
 
@@ -98,7 +101,9 @@ def flight_agent(state: TravelState):
 
 def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = tavily_search(query)
+    # hotel_results = tavily_search(query)
+    # Using the MCP client to access the tavily_search tool instead of direct import.
+    hotel_results = tavily_mcp_search(query)
 
     return {
         "hotel_results": hotel_results,
