@@ -2,6 +2,7 @@ import os
 
 import certifi
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -34,7 +35,10 @@ from langchain_groq import ChatGroq
 # Commmeting the tavily search import because we are now using the MCP client to access the tavily_search tool.
 
 from mcp_clients import tavily_mcp_search
-from tools.flight_tool import search_flights
+
+# from tools.flight_tool import search_flights
+# USing the MCP client to access the flight search tool instead of direct import.
+from mcp_clients import aviation_mcp_call
 
 
 def get_database_url():
@@ -83,13 +87,78 @@ class TravelState(TypedDict):
 # =========================
 
 
+# def flight_agent(state: TravelState):
+#     query = state["user_query"]
+#     flight_data = search_flights(query)
+
+#     return {
+#         "flight_results": flight_data,
+#         "messages": [AIMessage(content="Flight results fetched.")],
+#         "llm_calls": state.get("llm_calls", 0) + 1,
+#     }
+
+# Flight Tool Router Prompt
+FLIGHT_AGENT_PROMPT = """
+You are a travel flight expert.
+
+User Query:
+{query}
+
+Airport Information:
+{airport_data}
+
+Airline Information:
+{airline_data}
+
+Generate:
+
+1. Likely departure airport
+2. Likely arrival airport
+3. Airlines serving this route
+4. Typical flight duration
+5. Estimated airfare range
+6. Peak season pricing warning
+7. Booking advice
+
+Return concise travel guidance.
+"""
+
+
+# Flight Agent
 def flight_agent(state: TravelState):
+    print("\nINSIDE FLIGHT AGENT\n")
+
     query = state["user_query"]
-    flight_data = search_flights(query)
+
+    try:
+        airports = asyncio.run(aviation_mcp_call("list_airports"))
+
+        airlines = asyncio.run(aviation_mcp_call("list_airlines"))
+
+        print("\nAIRPORTS:", airports)
+        print("\nAIRLINES:", airlines)
+
+        prompt = FLIGHT_AGENT_PROMPT.format(
+            query=query,
+            airport_data=str(airports)[:3000],
+            airline_data=str(airlines)[:3000],
+        )
+
+        response = llm.invoke(
+            [
+                SystemMessage(content="You are an expert travel flight planner."),
+                HumanMessage(content=prompt),
+            ]
+        )
+
+        flight_data = response.content
+
+    except Exception as e:
+        flight_data = f"Flight information unavailable: {str(e)}"
 
     return {
         "flight_results": flight_data,
-        "messages": [AIMessage(content="Flight results fetched.")],
+        "messages": [AIMessage(content="Flight recommendations generated")],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 

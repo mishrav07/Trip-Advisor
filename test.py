@@ -23,7 +23,7 @@
 
 # =======================TESTING THE MCP CLIENT========================+++
 import asyncio
-from mcp_client_text1 import get_all_tools, tavily_mcp_search
+from mcp_clients import get_all_tools, tavily_mcp_search, aviation_mcp_call
 
 if __name__ == "__main__":
     asyncio.run(tavily_mcp_search("Latest News about the AI?"))
