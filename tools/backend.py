@@ -34,11 +34,17 @@ from langchain_groq import ChatGroq
 # from tools.tavily_tool import tavily_search
 # Commmeting the tavily search import because we are now using the MCP client to access the tavily_search tool.
 
-from mcp_clients import tavily_mcp_search
+from mcp_clients import (
+    tavily_mcp_search,
+    aviation_mcp_call,
+    extract_destination,
+    forecast_mcp_search,
+    weather_mcp_search,
+)
 
 # from tools.flight_tool import search_flights
 # USing the MCP client to access the flight search tool instead of direct import.
-from mcp_clients import aviation_mcp_call
+# from mcp_clients import aviation_mcp_call
 
 
 def get_database_url():
@@ -79,6 +85,7 @@ class TravelState(TypedDict):
     flight_results: str
     hotel_results: str
     itinerary: str
+    weather_results: str
     llm_calls: int
 
 
@@ -182,6 +189,28 @@ def hotel_agent(state: TravelState):
 
 
 # =========================
+# Weather Agent
+# =========================
+
+
+def weather_agent(state: TravelState):
+    city = extract_destination(state["user_query"])
+
+    weather_data = asyncio.run(weather_mcp_search(city))
+
+    forecast_data = asyncio.run(forecast_mcp_search(city))
+
+    return {
+        "weather_results": f"""
+        Current Weather: {weather_data}
+        Forecast: {forecast_data}
+        """,
+        "messages": [AIMessage(content="Weather information fetched.")],
+        # "llm_calls": state.get("llm_calls", 0) + 1,
+    }
+
+
+# =========================
 # Itinerary Agent
 # =========================
 
@@ -198,6 +227,9 @@ Flight Results:
 
 Hotel Results:
 {state["hotel_results"]}
+
+Weather Results:
+{state["weather_results"]}
 
 Make the itinerary practical, budget-aware, and easy to follow.
 """
@@ -233,6 +265,9 @@ Flights:
 
 Hotels:
 {state["hotel_results"]}
+
+Weather:
+{state["weather_results"]}
 
 Itinerary:
 {state["itinerary"]}
@@ -272,12 +307,14 @@ graph = StateGraph(TravelState)
 
 graph.add_node("flight_agent", flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("weather_agent", weather_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("final_agent", final_agent)
 
 graph.add_edge(START, "flight_agent")
 graph.add_edge("flight_agent", "hotel_agent")
-graph.add_edge("hotel_agent", "itinerary_agent")
+graph.add_edge("hotel_agent", "weather_agent")
+graph.add_edge("weather_agent", "itinerary_agent")
 graph.add_edge("itinerary_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
@@ -312,6 +349,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
             "user_query": user_input,
             "flight_results": "",
             "hotel_results": "",
+            "weather_results": "",
             "itinerary": "",
             "llm_calls": 0,
         },
@@ -325,6 +363,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
         "answer": final_answer,
         "flight_results": result.get("flight_results", ""),
         "hotel_results": result.get("hotel_results", ""),
+        "weather_results": result.get("weather_results", ""),
         "itinerary": result.get("itinerary", ""),
         "llm_calls": result.get("llm_calls", 0),
     }
