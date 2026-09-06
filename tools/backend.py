@@ -71,7 +71,7 @@ if not GROQ_API_KEY:
 # LLM
 # =========================
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY)
+llm = ChatGroq(model="qwen/qwen3.6-27b", max_tokens=900, api_key=GROQ_API_KEY)
 
 
 # =========================
@@ -179,7 +179,7 @@ def hotel_agent(state: TravelState):
     query = f"Best hotels for {state['user_query']}"
     # hotel_results = tavily_search(query)
     # Using the MCP client to access the tavily_search tool instead of direct import.
-    hotel_results = tavily_mcp_search(query)
+    hotel_results = asyncio.run(tavily_mcp_search(query))
 
     return {
         "hotel_results": hotel_results,
@@ -323,12 +323,13 @@ graph.add_edge("final_agent", END)
 # PostgreSQL Checkpointer
 # =========================
 DATABASE_URL = get_database_url()
+# print("Using DATABASE_URL:", DATABASE_URL)
 
 _conn = psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
 
 checkpointer = PostgresSaver(_conn)
 checkpointer.setup()
-
+print("PostgreSQL checkpointer setup complete.")
 travel_graph = graph.compile(checkpointer=checkpointer)
 
 

@@ -3,10 +3,10 @@
 # res = tavily_search("Python programming")
 # print(res)
 
-# from tools.backend import search_flights, get_database_url
+from tools.backend import get_database_url
 
-# res = get_database_url()
-# print(res)
+res = get_database_url()
+print(res)
 
 # res = search_flights("Plan a 7 days trip Germany to France")
 # print(res)
@@ -21,9 +21,9 @@
 # )
 # print(res["answer"])
 
-# =======================TESTING THE MCP CLIENT========================+++
-import asyncio
-from mcp_clients import get_all_tools, tavily_mcp_search, aviation_mcp_call
+# # =======================TESTING THE MCP CLIENT========================+++
+# import asyncio
+# from mcp_clients import get_all_tools, tavily_mcp_search, aviation_mcp_call
 
-if __name__ == "__main__":
-    asyncio.run(tavily_mcp_search("Latest News about the AI?"))
+# if __name__ == "__main__":
+#     asyncio.run(aviation_mcp_call("list_airports"))

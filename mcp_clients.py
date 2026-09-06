@@ -2,9 +2,11 @@ import os
 import asyncio
 import certifi
 from dotenv import load_dotenv
+from pathlib import Path
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from langchain_groq import ChatGroq
+
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -13,10 +15,19 @@ load_dotenv()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+OPEN_WEATHER_API_KEY = os.getenv("OPEN_WEATHER_API_KEY")
+
+PROJECT_DIR = Path(__file__).resolve().parent
+WEATHER_SERVER_PATH = PROJECT_DIR / "custom_weather_mcp.py"
+
+
+WEATHER_SERVER_PATH = "D:\Data Science\Generative AI\Self Learning - AI Projects\Trip-Advisor\custom_weather_mcp.py"
+# WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp_server.py"
 
 # LLM
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+llm = ChatGroq(
+    model="qwen/qwen3.6-27b", max_tokens=900, api_key=os.getenv("GROQ_API_KEY")
+)
 
 
 # Creating the client
@@ -30,16 +41,16 @@ client = MultiServerMCPClient(
         "aviationstack": {
             "transport": "stdio",
             "command": "uvx",
-            "args": ["aviationstack-mcp"],
-            "env": AVIATION_STACK_API_KEY,
+            "args": ["--with", "mcp<2", "aviationstack-mcp"],
+            "env": {"AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY},
         },
         "weather": {
             "transport": "stdio",
-            "command": r"C:\Users\vikas\anaconda3\python.exe",  # Add your own python environment path here. This is the path to the python.exe file in your conda environment.
+            "command": r"D:\Data Science\Generative AI\Self Learning - AI Projects\Trip-Advisor\.venv\Scripts\python.exe",  # Add your own python environment path here. This is the path to the python.exe file in your conda environment.
             "args": [
                 r"D:\Data Science\Generative AI\Self Learning - AI Projects\Trip-Advisor\custom_weather_mcp.py"
             ],  # Add the location where you have saved the custom_weather_mcp.py file. This is the path to the custom_weather_mcp.py file in your project directory.
-            "env": OPENWEATHER_API_KEY,
+            "env": {"OPEN_WEATHER_API_KEY": OPEN_WEATHER_API_KEY},
         },
     }
 )
@@ -177,41 +188,45 @@ async def initialize_weather_tools():
     global weather_tool
     global forecast_tool
 
-    if weather_tool is not None and forecast_tool is not None:
+    if weather_tool is not None:
         return
 
-    if not WEATHER_SERVER_PATH.exists():
-        raise FileNotFoundError(
-            f"Weather MCP server file was not found: {WEATHER_SERVER_PATH}"
-        )
+    # if not Path(WEATHER_SERVER_PATH).exists():
+    #     raise FileNotFoundError(
+    #         f"Weather MCP server file was not found: {WEATHER_SERVER_PATH}"
+    #     )
 
     # Load only Weather.
     # Tavily and AviationStack will not be started.
-    tools = await client.get_tools(server_name="weather")
+    # tools = await client.get_tools(server_name="weather")
 
-    tools_by_name = {tool.name: tool for tool in tools}
+    # tools_by_name = {tool.name: tool for tool in tools}
 
-    weather_tool = tools_by_name.get("get_current_weather")
+    # weather_tool = tools_by_name.get("get_current_weather")
 
-    forecast_tool = tools_by_name.get("get_forecast")
+    # forecast_tool = tools_by_name.get("get_forecast")
 
-    missing_tools = []
+    # missing_tools = []
 
-    if weather_tool is None:
-        missing_tools.append("get_current_weather")
+    # if weather_tool is None:
+    #     missing_tools.append("get_current_weather")
 
-    if forecast_tool is None:
-        missing_tools.append("get_forecast")
+    # if forecast_tool is None:
+    #     missing_tools.append("get_forecast")
 
-    if missing_tools:
-        available_tools = ", ".join(tools_by_name.keys())
+    # if missing_tools:
+    #     available_tools = ", ".join(tools_by_name.keys())
 
-        raise RuntimeError(
-            "Missing Weather MCP tools: "
-            f"{', '.join(missing_tools)}. "
-            f"Available tools: "
-            f"{available_tools or 'none'}"
-        )
+    #     raise RuntimeError(
+    #         "Missing Weather MCP tools: "
+    #         f"{', '.join(missing_tools)}. "
+    #         f"Available tools: "
+    #         f"{available_tools or 'none'}"
+    #     )
+
+    tools = await client.get_tools()
+    weather_tool = next(tool for tool in tools if tool.name == "get_current_weather")
+    forecast_tool = next(tool for tool in tools if tool.name == "get_forecast")
 
 
 async def weather_mcp_search(city: str):
