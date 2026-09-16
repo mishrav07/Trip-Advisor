@@ -26,7 +26,9 @@ WEATHER_SERVER_PATH = "D:\Data Science\Generative AI\Self Learning - AI Projects
 
 # LLM
 llm = ChatGroq(
-    model="qwen/qwen3.6-27b", max_tokens=900, api_key=os.getenv("GROQ_API_KEY")
+    model="qwen/qwen3.8-27b",
+    max_tokens=512,
+    api_key=os.getenv("GROQ_API_KEY"),
 )
 
 

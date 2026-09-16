@@ -1,115 +1,113 @@
 /* =========================================================
-   TripMate AI - Frontend Controller
-   Compatible with LangGraph Travel Agent backend
+   AI TRAVEL PLANNER
+   Modern Light / Colorful UI
    ========================================================= */
 
 let currentThreadId =
     localStorage.getItem("travel_thread_id") || null;
 
 let latestAnswerMarkdown = "";
-let latestBackendData = null;
 
-const API_ENDPOINT = "/api/travel";
-
-/*
- * If your FastAPI backend exposes the resume endpoint:
- *
- * POST /api/travel/resume
- *
- * with:
- * {
- *   thread_id,
- *   approved,
- *   feedback
- * }
- *
- * keep this value.
- */
-const RESUME_ENDPOINT = "/api/travel/resume";
+let waitingForApproval = false;
 
 
 /* =========================================================
-   DOM HELPERS
+   AGENT CONFIGURATION
    ========================================================= */
 
-function $(id) {
-    return document.getElementById(id);
-}
+const AGENT_LABELS = {
+    flight_agent: "✈️ Flight Agent",
+    hotel_agent: "🏨 Hotel Agent",
+    weather_agent: "🌦️ Weather Agent",
+    budget_agent: "💰 Budget Agent",
+    itinerary_agent: "🗓️ Itinerary Agent"
+};
 
-function escapeHtml(value) {
-    if (value === null || value === undefined) {
-        return "";
-    }
-
-    return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-
-function safeJson(value) {
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
-}
+const AGENT_COLORS = {
+    flight_agent: "blue",
+    hotel_agent: "purple",
+    weather_agent: "cyan",
+    budget_agent: "green",
+    itinerary_agent: "orange"
+};
 
 
 /* =========================================================
-   PROMPTS
+   QUICK PROMPT
    ========================================================= */
 
 function setPrompt(text) {
-    const input = $("userInput");
+    const input = document.getElementById("userInput");
 
     if (!input) return;
 
     input.value = text;
+
     input.focus();
 
-    updateCharacterCount();
+    /* Put cursor at the end */
+    input.selectionStart = input.selectionEnd = input.value.length;
 }
 
 
 /* =========================================================
-   LOADING
+   LOADING STATE
    ========================================================= */
 
-function setLoading(isLoading) {
+function setLoading(isLoading, mode = "draft") {
+    const sendBtn = document.getElementById("sendBtn");
+    const btnText = document.getElementById("btnText");
+    const btnLoader = document.getElementById("btnLoader");
 
-    const sendBtn = $("sendBtn");
-    const btnText = $("btnText");
-    const btnLoader = $("btnLoader");
+    const approveBtn = document.getElementById("approveBtn");
+    const reviseBtn = document.getElementById("reviseBtn");
 
-    if (sendBtn) {
-        sendBtn.disabled = isLoading;
-        sendBtn.classList.toggle("loading", isLoading);
+    if (!sendBtn) return;
+
+    sendBtn.disabled = isLoading;
+
+    if (approveBtn) {
+        approveBtn.disabled = isLoading;
     }
 
-    if (btnText) {
-        btnText.classList.toggle("hidden", isLoading);
+    if (reviseBtn) {
+        reviseBtn.disabled = isLoading;
     }
 
-    if (btnLoader) {
-        btnLoader.classList.toggle("hidden", !isLoading);
-    }
+    if (isLoading) {
 
-    const input = $("userInput");
+        if (mode === "draft") {
+            if (btnText) {
+                btnText.textContent = "Creating plan...";
+                btnText.classList.remove("hidden");
+            }
+        }
 
-    if (input) {
-        input.disabled = isLoading;
-    }
+        if (mode === "approval") {
+            if (btnText) {
+                btnText.textContent = "Updating plan...";
+                btnText.classList.remove("hidden");
+            }
+        }
 
-    document.body.classList.toggle("tripmate-loading", isLoading);
+        if (btnLoader) {
+            btnLoader.classList.remove("hidden");
+        }
 
-    const processing = $("processingSection");
+        sendBtn.classList.add("loading");
 
-    if (processing) {
-        processing.classList.toggle("hidden", !isLoading);
+    } else {
+
+        if (btnText) {
+            btnText.textContent = "Create Travel Plan";
+            btnText.classList.remove("hidden");
+        }
+
+        if (btnLoader) {
+            btnLoader.classList.add("hidden");
+        }
+
+        sendBtn.classList.remove("loading");
     }
 }
 
@@ -119,76 +117,156 @@ function setLoading(isLoading) {
    ========================================================= */
 
 function showError(message) {
+    const errorBox = document.getElementById("errorBox");
 
-    const errorBox = $("errorBox");
+    if (!errorBox) return;
 
-    if (!errorBox) {
-        console.error(message);
-        return;
-    }
-
-    errorBox.innerHTML = `
-        <div class="error-icon">!</div>
-        <div>
-            <strong>Something went wrong</strong>
-            <p>${escapeHtml(message)}</p>
-        </div>
-    `;
+    errorBox.textContent = message;
 
     errorBox.classList.remove("hidden");
 
     errorBox.scrollIntoView({
         behavior: "smooth",
-        block: "nearest"
+        block: "center"
     });
 }
 
-
 function hideError() {
-
-    const errorBox = $("errorBox");
+    const errorBox = document.getElementById("errorBox");
 
     if (!errorBox) return;
 
     errorBox.classList.add("hidden");
-    errorBox.innerHTML = "";
+
+    errorBox.textContent = "";
 }
 
 
 /* =========================================================
-   MARKDOWN
+   MARKDOWN RENDERING
    ========================================================= */
 
-function renderMarkdown(markdown) {
-
-    if (!markdown) {
-        return "<p>No travel plan was returned.</p>";
-    }
+function renderMarkdown(element, markdown) {
+    if (!element) return;
 
     if (typeof marked !== "undefined") {
 
         try {
+            element.innerHTML = marked.parse(markdown || "");
+        } catch (error) {
+            element.innerText = markdown || "";
+        }
 
-            const html = marked.parse(markdown);
+    } else {
+        element.innerText = markdown || "";
+    }
+}
+
+
+/* =========================================================
+   WORKFLOW
+   ========================================================= */
+
+function showWorkflow(data) {
+    const section =
+        document.getElementById("workflowSection");
+
+    const reasoning =
+        document.getElementById("supervisorReasoning");
+
+    const chips =
+        document.getElementById("agentChips");
+
+    const guardrailBadge =
+        document.getElementById("guardrailBadge");
+
+    if (!section) return;
+
+
+    /* -----------------------------------------
+       Supervisor reasoning
+       ----------------------------------------- */
+
+    if (reasoning) {
+        reasoning.textContent =
+            data.supervisor_reasoning ||
+            "Supervisor routing completed.";
+    }
+
+
+    /* -----------------------------------------
+       Agent chips
+       ----------------------------------------- */
+
+    if (chips) {
+
+        chips.innerHTML = "";
+
+        const selectedAgents =
+            Array.isArray(data.selected_agents)
+                ? data.selected_agents
+                : [];
+
+        selectedAgents.forEach((agent) => {
+
+            const chip =
+                document.createElement("span");
+
+            chip.className = "agent-chip";
 
             /*
-             * DOMPurify is used when available.
-             * This prevents backend-generated HTML from being
-             * inserted directly into the page.
+             * Optional color class.
+             * Works with the new colorful CSS.
              */
+            const color =
+                AGENT_COLORS[agent];
 
-            if (typeof DOMPurify !== "undefined") {
-                return DOMPurify.sanitize(html);
+            if (color) {
+                chip.classList.add(`agent-${color}`);
             }
 
-            return html;
+            chip.textContent =
+                AGENT_LABELS[agent] || agent;
 
-        } catch (error) {
-            console.warn("Markdown rendering failed:", error);
+            chips.appendChild(chip);
+        });
+    }
+
+
+    /* -----------------------------------------
+       Guardrail
+       ----------------------------------------- */
+
+    if (guardrailBadge) {
+
+        if (data.guardrail_allowed === false) {
+
+            guardrailBadge.textContent =
+                "Guardrail blocked";
+
+            guardrailBadge.classList.add("blocked");
+
+        } else {
+
+            guardrailBadge.textContent =
+                "Guardrail passed";
+
+            guardrailBadge.classList.remove("blocked");
         }
     }
 
-    return `<pre>${escapeHtml(markdown)}</pre>`;
+
+    /* -----------------------------------------
+       Show section
+       ----------------------------------------- */
+
+    section.classList.remove("hidden");
+
+    section.classList.add("ui-visible");
+
+    setTimeout(() => {
+        section.classList.remove("ui-visible");
+    }, 500);
 }
 
 
@@ -196,707 +274,231 @@ function renderMarkdown(markdown) {
    RESULT
    ========================================================= */
 
-function showResult(answer, threadId, data = {}) {
-
+function showResult(
+    answer,
+    threadId,
+    isDraft = false
+) {
     latestAnswerMarkdown = answer || "";
-    latestBackendData = data || {};
 
-    const resultSection = $("resultSection");
-    const resultBox = $("resultBox");
-    const threadInfo = $("threadInfo");
+    const resultSection =
+        document.getElementById("resultSection");
 
-    if (!resultSection || !resultBox) {
-        console.warn("Result section not found in HTML.");
-        return;
-    }
+    const resultBox =
+        document.getElementById("resultBox");
 
-    resultBox.innerHTML = renderMarkdown(answer);
+    const threadInfo =
+        document.getElementById("threadInfo");
+
+    const resultTitle =
+        document.getElementById("resultTitle");
+
+    if (!resultSection || !resultBox) return;
+
+
+    /* -----------------------------------------
+       Render markdown
+       ----------------------------------------- */
+
+    renderMarkdown(
+        resultBox,
+        latestAnswerMarkdown
+    );
+
+
+    /* -----------------------------------------
+       Thread information
+       ----------------------------------------- */
 
     if (threadInfo) {
-        threadInfo.innerHTML = `
-            <span class="thread-label">Conversation</span>
-            <span class="thread-id">${escapeHtml(threadId || "New thread")}</span>
-        `;
+
+        if (threadId) {
+            threadInfo.textContent =
+                `Thread ID: ${threadId}`;
+        } else {
+            threadInfo.textContent = "";
+        }
     }
+
+
+    /* -----------------------------------------
+       Result title
+       ----------------------------------------- */
+
+    if (resultTitle) {
+
+        resultTitle.textContent =
+            isDraft
+                ? "Draft Travel Plan"
+                : "Your Final AI Travel Plan";
+    }
+
+
+    /* -----------------------------------------
+       Show result
+       ----------------------------------------- */
 
     resultSection.classList.remove("hidden");
 
-    renderBackendDetails(data);
+    resultSection.classList.add("ui-visible");
 
-    resultSection.scrollIntoView({
-        behavior: "smooth",
-        block: "start"
-    });
-}
+    setTimeout(() => {
+        resultSection.classList.remove("ui-visible");
+    }, 500);
 
 
-/* =========================================================
-   BACKEND RESPONSE DETAILS
-   ========================================================= */
+    /* -----------------------------------------
+       Scroll to result
+       ----------------------------------------- */
 
-function renderBackendDetails(data) {
+    setTimeout(() => {
 
-    if (!data) return;
-
-    /*
-     * Create a dynamic details container if it does not exist.
-     * This means the existing HTML does not need to contain
-     * separate flight/hotel/weather/itinerary containers.
-     */
-
-    let details = document.getElementById("backendDetails");
-
-    if (!details) {
-
-        details = document.createElement("div");
-        details.id = "backendDetails";
-        details.className = "backend-details";
-
-        const resultBox = $("resultBox");
-
-        if (resultBox && resultBox.parentNode) {
-            resultBox.parentNode.appendChild(details);
-        } else {
-            return;
-        }
-    }
-
-    details.innerHTML = "";
-
-
-    /* -----------------------------------------------------
-       APPROVAL
-       ----------------------------------------------------- */
-
-    if (
-        data.requires_approval === true ||
-        data.approval_request
-    ) {
-        renderApprovalPanel(details, data);
-    }
-
-
-    /* -----------------------------------------------------
-       TRIP CONSTRAINTS
-       ----------------------------------------------------- */
-
-    if (data.trip_constraints) {
-
-        addDetailsCard(
-            details,
-            "Trip Requirements",
-            "🧭",
-            renderObjectGrid(data.trip_constraints)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       SELECTED AGENTS
-       ----------------------------------------------------- */
-
-    if (
-        Array.isArray(data.selected_agents) &&
-        data.selected_agents.length
-    ) {
-
-        addDetailsCard(
-            details,
-            "Agents Used",
-            "🤖",
-            `
-            <div class="agent-list">
-                ${data.selected_agents
-                .map(agent => `
-                        <span class="agent-chip">
-                            <span class="agent-dot"></span>
-                            ${escapeHtml(agent)}
-                        </span>
-                    `)
-                .join("")}
-            </div>
-            `
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       FLIGHTS
-       ----------------------------------------------------- */
-
-    if (data.flight_results) {
-
-        addDetailsCard(
-            details,
-            "Flight Results",
-            "✈️",
-            renderBackendData(data.flight_results)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       HOTELS
-       ----------------------------------------------------- */
-
-    if (data.hotel_results) {
-
-        addDetailsCard(
-            details,
-            "Hotel Results",
-            "🏨",
-            renderBackendData(data.hotel_results)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       WEATHER
-       ----------------------------------------------------- */
-
-    if (data.weather_results) {
-
-        addDetailsCard(
-            details,
-            "Weather",
-            "🌤️",
-            renderBackendData(data.weather_results)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       BUDGET
-       ----------------------------------------------------- */
-
-    if (data.budget_results) {
-
-        addDetailsCard(
-            details,
-            "Budget",
-            "💶",
-            renderBackendData(data.budget_results)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       ITINERARY
-       ----------------------------------------------------- */
-
-    if (data.itinerary) {
-
-        addDetailsCard(
-            details,
-            "Generated Itinerary",
-            "🗺️",
-            renderBackendData(data.itinerary)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       SUPERVISOR REASONING
-       ----------------------------------------------------- */
-
-    if (data.supervisor_reasoning) {
-
-        addDetailsCard(
-            details,
-            "Planning Logic",
-            "🧠",
-            `
-            <div class="reasoning-box">
-                ${renderMarkdown(
-                String(data.supervisor_reasoning)
-            )}
-            </div>
-            `
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       LLM CALLS
-       ----------------------------------------------------- */
-
-    if (data.llm_calls) {
-
-        addDetailsCard(
-            details,
-            "AI Processing",
-            "⚡",
-            renderBackendData(data.llm_calls)
-        );
-    }
-
-
-    /* -----------------------------------------------------
-       GUARDRAIL STATUS
-       ----------------------------------------------------- */
-
-    if (
-        data.guardrail_allowed !== undefined ||
-        data.guardrail_reason
-    ) {
-
-        const allowed = data.guardrail_allowed !== false;
-
-        addDetailsCard(
-            details,
-            "Request Validation",
-            allowed ? "✓" : "⚠️",
-            `
-            <div class="guardrail-status ${allowed ? "allowed" : "blocked"}">
-                <span class="guardrail-dot"></span>
-
-                <div>
-                    <strong>
-                        ${allowed ? "Request accepted" : "Request restricted"}
-                    </strong>
-
-                    ${data.guardrail_reason
-                ? `<p>${escapeHtml(data.guardrail_reason)}</p>`
-                : ""
-            }
-                </div>
-            </div>
-            `
-        );
-    }
-
-
-    if (!details.innerHTML.trim()) {
-        details.classList.add("hidden");
-    } else {
-        details.classList.remove("hidden");
-    }
-}
-
-
-/* =========================================================
-   APPROVAL PANEL
-   ========================================================= */
-
-function renderApprovalPanel(container, data) {
-
-    const panel = document.createElement("div");
-
-    panel.className = "approval-panel";
-
-    const request =
-        data.approval_request ||
-        "The travel plan requires your approval before continuing.";
-
-    panel.innerHTML = `
-        <div class="approval-header">
-            <div class="approval-icon">✓</div>
-
-            <div>
-                <h3>Approval Required</h3>
-                <p>
-                    TripMate needs your confirmation before
-                    continuing with the travel plan.
-                </p>
-            </div>
-        </div>
-
-        <div class="approval-message">
-            ${renderMarkdown(String(request))}
-        </div>
-
-        <div class="approval-feedback">
-            <label for="approvalFeedback">
-                Optional feedback
-            </label>
-
-            <textarea
-                id="approvalFeedback"
-                placeholder="Add changes or preferences before continuing..."
-                rows="3"
-            ></textarea>
-        </div>
-
-        <div class="approval-actions">
-
-            <button
-                id="approveTripBtn"
-                class="approval-btn approve"
-                type="button"
-            >
-                ✓ Approve & Continue
-            </button>
-
-            <button
-                id="rejectTripBtn"
-                class="approval-btn reject"
-                type="button"
-            >
-                ✕ Reject
-            </button>
-
-        </div>
-    `;
-
-    container.prepend(panel);
-
-    document
-        .getElementById("approveTripBtn")
-        ?.addEventListener("click", () => {
-            resumeTravel(true);
+        resultSection.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
         });
 
-    document
-        .getElementById("rejectTripBtn")
-        ?.addEventListener("click", () => {
-            resumeTravel(false);
-        });
+    }, 100);
 }
 
 
 /* =========================================================
-   RESUME LANGGRAPH HUMAN-IN-THE-LOOP
+   APPROVAL SECTION
    ========================================================= */
 
-async function resumeTravel(approved) {
+function showApproval(data) {
+    waitingForApproval = true;
+
+    const section =
+        document.getElementById("approvalSection");
+
+    const approvalRequest =
+        document.getElementById("approvalRequest");
+
+    if (!section) return;
+
+
+    if (approvalRequest) {
+
+        approvalRequest.textContent =
+            data.approval_request ||
+            "Review the draft and approve it, or provide feedback to request changes.";
+    }
+
+
+    section.classList.remove("hidden");
+
+    section.classList.add("approval-active");
+
+    setTimeout(() => {
+        section.classList.remove("approval-active");
+    }, 500);
+
+
+    /* Scroll to approval area */
+
+    setTimeout(() => {
+
+        section.scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+        });
+
+    }, 150);
+}
+
+
+function hideApproval() {
+
+    waitingForApproval = false;
+
+    const section =
+        document.getElementById("approvalSection");
+
+    const feedback =
+        document.getElementById("approvalFeedback");
+
+    if (section) {
+        section.classList.add("hidden");
+        section.classList.remove("approval-active");
+    }
+
+    if (feedback) {
+        feedback.value = "";
+    }
+}
+
+
+/* =========================================================
+   RESET WORKFLOW UI
+   ========================================================= */
+
+function resetWorkflowUI() {
 
     hideError();
 
-    const feedbackElement =
-        document.getElementById("approvalFeedback");
+    hideApproval();
 
-    const feedback =
-        feedbackElement?.value.trim() || "";
+    const workflowSection =
+        document.getElementById("workflowSection");
 
-    if (!currentThreadId) {
-        showError(
-            "No active travel conversation was found."
-        );
-        return;
+    if (workflowSection) {
+        workflowSection.classList.add("hidden");
     }
 
-    const approveBtn =
-        document.getElementById("approveTripBtn");
+    const resultSection =
+        document.getElementById("resultSection");
 
-    const rejectBtn =
-        document.getElementById("rejectTripBtn");
-
-    if (approveBtn) approveBtn.disabled = true;
-    if (rejectBtn) rejectBtn.disabled = true;
-
-    try {
-
-        const response = await fetch(RESUME_ENDPOINT, {
-            method: "POST",
-
-            headers: {
-                "Content-Type": "application/json"
-            },
-
-            body: JSON.stringify({
-                thread_id: currentThreadId,
-                approved: approved,
-                feedback: feedback
-            })
-        });
-
-
-        const data = await response.json();
-
-
-        if (!response.ok || data.success === false) {
-
-            throw new Error(
-                data.error ||
-                "Unable to continue the travel planning process."
-            );
-        }
-
-
-        currentThreadId =
-            data.thread_id ||
-            currentThreadId;
-
-        localStorage.setItem(
-            "travel_thread_id",
-            currentThreadId
-        );
-
-
-        showResult(
-            data.answer || "",
-            currentThreadId,
-            data
-        );
-
-
-    } catch (error) {
-
-        showError(error.message);
-
-        if (approveBtn) approveBtn.disabled = false;
-        if (rejectBtn) rejectBtn.disabled = false;
+    if (resultSection) {
+        resultSection.classList.add("hidden");
     }
+
+    latestAnswerMarkdown = "";
 }
 
 
 /* =========================================================
-   GENERIC BACKEND DATA RENDERER
-   ========================================================= */
-
-function renderBackendData(data) {
-
-    if (data === null || data === undefined) {
-        return "<p>No data available.</p>";
-    }
-
-
-    if (typeof data === "string") {
-
-        return renderMarkdown(data);
-    }
-
-
-    if (typeof data === "number" ||
-        typeof data === "boolean") {
-
-        return `
-            <div class="single-value">
-                ${escapeHtml(data)}
-            </div>
-        `;
-    }
-
-
-    if (Array.isArray(data)) {
-
-        if (!data.length) {
-            return `
-                <div class="empty-data">
-                    No results available.
-                </div>
-            `;
-        }
-
-
-        /*
-         * Arrays containing objects become responsive
-         * result cards instead of a huge JSON block.
-         */
-
-        if (
-            typeof data[0] === "object" &&
-            data[0] !== null
-        ) {
-
-            return `
-                <div class="data-grid">
-
-                    ${data.map((item, index) => `
-
-                        <div class="data-item">
-
-                            <div class="data-item-number">
-                                ${index + 1}
-                            </div>
-
-                            <div class="data-item-content">
-
-                                ${renderObjectGrid(item)}
-
-                            </div>
-
-                        </div>
-
-                    `).join("")}
-
-                </div>
-            `;
-        }
-
-
-        return `
-            <ul class="backend-list">
-                ${data.map(item => `
-                    <li>${escapeHtml(item)}</li>
-                `).join("")}
-            </ul>
-        `;
-    }
-
-
-    if (typeof data === "object") {
-
-        return renderObjectGrid(data);
-    }
-
-
-    return `<pre>${escapeHtml(String(data))}</pre>`;
-}
-
-
-/* =========================================================
-   OBJECT GRID
-   ========================================================= */
-
-function renderObjectGrid(object) {
-
-    if (!object || typeof object !== "object") {
-        return escapeHtml(object);
-    }
-
-
-    return `
-        <div class="object-grid">
-
-            ${Object.entries(object)
-            .map(([key, value]) => {
-
-                if (
-                    value === null ||
-                    value === undefined ||
-                    value === ""
-                ) {
-                    return "";
-                }
-
-                let displayValue;
-
-                if (
-                    typeof value === "object"
-                ) {
-                    displayValue = `
-                            <pre class="nested-json">
-                                ${escapeHtml(
-                        safeJson(value)
-                    )}
-                            </pre>
-                        `;
-                } else {
-                    displayValue =
-                        escapeHtml(value);
-                }
-
-                return `
-                        <div class="object-field">
-
-                            <span class="object-key">
-                                ${formatKey(key)}
-                            </span>
-
-                            <div class="object-value">
-                                ${displayValue}
-                            </div>
-
-                        </div>
-                    `;
-
-            })
-            .join("")}
-
-        </div>
-    `;
-}
-
-
-/* =========================================================
-   KEY FORMATTER
-   ========================================================= */
-
-function formatKey(key) {
-
-    return String(key)
-        .replace(/_/g, " ")
-        .replace(/([a-z])([A-Z])/g, "$1 $2")
-        .replace(/\b\w/g, char =>
-            char.toUpperCase()
-        );
-}
-
-
-/* =========================================================
-   DETAILS CARD
-   ========================================================= */
-
-function addDetailsCard(
-    container,
-    title,
-    icon,
-    content
-) {
-
-    const card = document.createElement("section");
-
-    card.className = "backend-card";
-
-    card.innerHTML = `
-        <div class="backend-card-header">
-
-            <div class="backend-card-title">
-
-                <span class="backend-card-icon">
-                    ${icon}
-                </span>
-
-                <div>
-                    <h3>${escapeHtml(title)}</h3>
-                </div>
-
-            </div>
-
-            <button
-                class="details-toggle"
-                type="button"
-                aria-label="Toggle section"
-            >
-                −
-            </button>
-
-        </div>
-
-        <div class="backend-card-content">
-            ${content}
-        </div>
-    `;
-
-    container.appendChild(card);
-
-
-    const toggle =
-        card.querySelector(".details-toggle");
-
-    const body =
-        card.querySelector(".backend-card-content");
-
-
-    toggle?.addEventListener("click", () => {
-
-        const hidden =
-            body.classList.toggle("collapsed");
-
-        toggle.textContent =
-            hidden ? "+" : "−";
-    });
-}
-
-
-/* =========================================================
-   MAIN REQUEST
+   SEND MESSAGE
    ========================================================= */
 
 async function sendMessage() {
 
     hideError();
 
-    const input = $("userInput");
 
-    if (!input) {
-        showError("Travel input field was not found.");
+    /* -----------------------------------------
+       Prevent duplicate workflows
+       ----------------------------------------- */
+
+    if (waitingForApproval) {
+
+        showError(
+            "Please approve or revise the current draft before starting another plan."
+        );
+
         return;
     }
 
-    const message = input.value.trim();
 
+    /* -----------------------------------------
+       Get input
+       ----------------------------------------- */
+
+    const input =
+        document.getElementById("userInput");
+
+    if (!input) {
+        showError("Travel input field could not be found.");
+        return;
+    }
+
+    const message =
+        input.value.trim();
+
+
+    /* -----------------------------------------
+       Validate
+       ----------------------------------------- */
 
     if (!message) {
 
@@ -910,13 +512,17 @@ async function sendMessage() {
     }
 
 
-    setLoading(true);
+    /* -----------------------------------------
+       Start loading
+       ----------------------------------------- */
+
+    setLoading(true, "draft");
+
 
     try {
 
-        const response = await fetch(
-            API_ENDPOINT,
-            {
+        const response =
+            await fetch("/api/travel", {
                 method: "POST",
 
                 headers: {
@@ -927,39 +533,40 @@ async function sendMessage() {
                     message: message,
                     thread_id: currentThreadId
                 })
-            }
-        );
+            });
 
 
-        /*
-         * Handle non-JSON responses gracefully.
-         */
+        /* -----------------------------------------
+           Parse response safely
+           ----------------------------------------- */
 
         let data;
 
         try {
             data = await response.json();
-        } catch {
+        } catch (error) {
             throw new Error(
-                `Server returned an invalid response (${response.status}).`
+                "The server returned an invalid response."
             );
         }
 
 
-        if (!response.ok || data.success === false) {
+        /* -----------------------------------------
+           API error
+           ----------------------------------------- */
+
+        if (!response.ok || !data.success) {
 
             throw new Error(
                 data.error ||
-                data.message ||
-                `Travel request failed (${response.status}).`
+                "Something went wrong while creating your travel plan."
             );
         }
 
 
-        /*
-         * Backend creates a UUID when thread_id is not
-         * supplied. Persist it for subsequent requests.
-         */
+        /* -----------------------------------------
+           Store thread
+           ----------------------------------------- */
 
         if (data.thread_id) {
 
@@ -973,28 +580,225 @@ async function sendMessage() {
         }
 
 
+        /* -----------------------------------------
+           Workflow
+           ----------------------------------------- */
+
+        showWorkflow(data);
+
+
+        /* -----------------------------------------
+           Approval required
+           ----------------------------------------- */
+
+        if (data.requires_approval) {
+
+            showResult(
+                data.itinerary || data.answer,
+                data.thread_id,
+                true
+            );
+
+            showApproval(data);
+
+        } else {
+
+            hideApproval();
+
+            showResult(
+                data.answer,
+                data.thread_id,
+                false
+            );
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            "Travel workflow error:",
+            error
+        );
+
+        showError(
+            error.message ||
+            "Unable to create your travel plan."
+        );
+
+    } finally {
+
+        setLoading(false, "draft");
+    }
+}
+
+
+/* =========================================================
+   APPROVAL / REVISION
+   ========================================================= */
+
+async function submitApproval(approved) {
+
+    hideError();
+
+
+    /* -----------------------------------------
+       Validate thread
+       ----------------------------------------- */
+
+    if (!currentThreadId) {
+
+        showError(
+            "There is no active travel thread."
+        );
+
+        return;
+    }
+
+
+    if (!waitingForApproval) {
+
+        showError(
+            "There is no draft waiting for approval."
+        );
+
+        return;
+    }
+
+
+    /* -----------------------------------------
+       Get feedback
+       ----------------------------------------- */
+
+    const feedbackInput =
+        document.getElementById(
+            "approvalFeedback"
+        );
+
+    const feedback =
+        feedbackInput
+            ? feedbackInput.value.trim()
+            : "";
+
+
+    /* -----------------------------------------
+       Revision requires feedback
+       ----------------------------------------- */
+
+    if (!approved && !feedback) {
+
+        showError(
+            "Please enter revision feedback before requesting changes."
+        );
+
+        if (feedbackInput) {
+            feedbackInput.focus();
+        }
+
+        return;
+    }
+
+
+    /* -----------------------------------------
+       Loading
+       ----------------------------------------- */
+
+    setLoading(true, "approval");
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/travel/approve",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        thread_id:
+                            currentThreadId,
+
+                        approved:
+                            approved,
+
+                        feedback:
+                            feedback
+                    })
+                }
+            );
+
+
+        /* -----------------------------------------
+           Parse response
+           ----------------------------------------- */
+
+        let data;
+
+        try {
+            data = await response.json();
+        } catch (error) {
+            throw new Error(
+                "The server returned an invalid response."
+            );
+        }
+
+
+        /* -----------------------------------------
+           API error
+           ----------------------------------------- */
+
+        if (!response.ok || !data.success) {
+
+            throw new Error(
+                data.error ||
+                "Could not resume the travel workflow."
+            );
+        }
+
+
+        /* -----------------------------------------
+           Update workflow
+           ----------------------------------------- */
+
+        showWorkflow(data);
+
+
+        /* -----------------------------------------
+           Hide approval
+           ----------------------------------------- */
+
+        hideApproval();
+
+
+        /* -----------------------------------------
+           Show final result
+           ----------------------------------------- */
+
         showResult(
-            data.answer || "",
+            data.answer,
             data.thread_id || currentThreadId,
-            data
+            false
         );
 
 
     } catch (error) {
 
         console.error(
-            "TripMate request failed:",
+            "Approval workflow error:",
             error
         );
 
         showError(
             error.message ||
-            "Unable to connect to the travel planner."
+            "Unable to update the travel plan."
         );
 
     } finally {
 
-        setLoading(false);
+        setLoading(false, "approval");
     }
 }
 
@@ -1005,7 +809,8 @@ async function sendMessage() {
 
 async function copyResult() {
 
-    const resultBox = $("resultBox");
+    const resultBox =
+        document.getElementById("resultBox");
 
     if (!resultBox) return;
 
@@ -1016,7 +821,7 @@ async function copyResult() {
     if (!text) {
 
         showError(
-            "No travel plan available to copy."
+            "There is no travel plan to copy."
         );
 
         return;
@@ -1027,12 +832,42 @@ async function copyResult() {
 
         await navigator.clipboard.writeText(text);
 
-        showTemporaryButtonMessage(
-            ".copy-btn",
-            "✓ Copied"
+
+        const copyBtn =
+            document.querySelector(".copy-btn");
+
+        if (!copyBtn) return;
+
+
+        const oldText =
+            copyBtn.textContent;
+
+        copyBtn.textContent =
+            "✓ Copied!";
+
+        copyBtn.classList.add(
+            "copy-success"
         );
 
-    } catch {
+
+        setTimeout(() => {
+
+            copyBtn.textContent =
+                oldText;
+
+            copyBtn.classList.remove(
+                "copy-success"
+            );
+
+        }, 1600);
+
+
+    } catch (error) {
+
+        console.error(
+            "Copy error:",
+            error
+        );
 
         showError(
             "Could not copy the travel plan."
@@ -1042,46 +877,16 @@ async function copyResult() {
 
 
 /* =========================================================
-   BUTTON FEEDBACK
+   DOWNLOAD PDF
    ========================================================= */
 
-function showTemporaryButtonMessage(
-    selector,
-    message
-) {
-
-    const button =
-        document.querySelector(selector);
-
-    if (!button) return;
-
-    const original =
-        button.dataset.originalText ||
-        button.textContent;
-
-    button.dataset.originalText = original;
-
-    button.textContent = message;
-
-    setTimeout(() => {
-        button.textContent = original;
-    }, 1600);
-}
-
-
-/* =========================================================
-   PDF
-   ========================================================= */
-
-async function downloadPDF() {
+function downloadPDF() {
 
     const pdfContent =
-        $("pdfContent");
+        document.getElementById("pdfContent");
 
-    if (
-        !latestAnswerMarkdown ||
-        !pdfContent
-    ) {
+
+    if (!latestAnswerMarkdown) {
 
         showError(
             "No travel plan available to download."
@@ -1091,15 +896,38 @@ async function downloadPDF() {
     }
 
 
+    if (!pdfContent) {
+
+        showError(
+            "PDF content could not be found."
+        );
+
+        return;
+    }
+
+
+    if (typeof html2pdf === "undefined") {
+
+        showError(
+            "PDF download library is not available."
+        );
+
+        return;
+    }
+
+
     const downloadBtn =
-        document.querySelector(".download-btn");
+        document.querySelector(
+            ".download-btn"
+        );
 
-    const oldText =
-        downloadBtn?.textContent ||
-        "Download PDF";
 
+    let oldText = "";
 
     if (downloadBtn) {
+
+        oldText =
+            downloadBtn.textContent;
 
         downloadBtn.textContent =
             "Preparing PDF...";
@@ -1108,191 +936,102 @@ async function downloadPDF() {
     }
 
 
-    /*
-     * Populate the PDF container with the actual
-     * backend answer rather than relying on hidden
-     * stale HTML.
-     */
+    const options = {
 
-    const pdfAnswer =
-        pdfContent.querySelector(
-            ".pdf-answer"
-        );
+        margin: 0.5,
 
+        filename:
+            "ai-travel-plan.pdf",
 
-    if (pdfAnswer) {
+        image: {
+            type: "jpeg",
+            quality: 0.98
+        },
 
-        pdfAnswer.innerHTML =
-            renderMarkdown(
-                latestAnswerMarkdown
-            );
+        html2canvas: {
 
-    } else {
+            scale: 2,
 
-        pdfContent.innerHTML = `
-            <div class="pdf-title">
-                <h1>TripMate AI</h1>
-                <p>AI Generated Travel Plan</p>
-            </div>
+            useCORS: true,
 
-            <div class="pdf-answer">
-                ${renderMarkdown(
-            latestAnswerMarkdown
-        )}
-            </div>
-        `;
-    }
+            backgroundColor:
+                "#ffffff"
+        },
 
+        jsPDF: {
 
-    try {
+            unit: "in",
 
-        if (
-            typeof html2pdf ===
-            "undefined"
-        ) {
-            throw new Error(
-                "PDF library is not available."
-            );
+            format: "a4",
+
+            orientation:
+                "portrait"
+        },
+
+        pagebreak: {
+
+            mode: [
+                "avoid-all",
+                "css",
+                "legacy"
+            ]
         }
+    };
 
 
-        const options = {
+    html2pdf()
 
-            margin: 0.5,
+        .set(options)
 
-            filename:
-                "tripmate-ai-travel-plan.pdf",
+        .from(pdfContent)
 
-            image: {
-                type: "jpeg",
-                quality: 0.98
-            },
+        .save()
 
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: "#ffffff"
-            },
+        .then(() => {
 
-            jsPDF: {
-                unit: "in",
-                format: "a4",
-                orientation: "portrait"
-            },
+            if (downloadBtn) {
 
-            pagebreak: {
-                mode: [
-                    "avoid-all",
-                    "css",
-                    "legacy"
-                ]
+                downloadBtn.textContent =
+                    "✓ Downloaded";
+
+                setTimeout(() => {
+
+                    downloadBtn.textContent =
+                        oldText;
+
+                    downloadBtn.disabled =
+                        false;
+
+                }, 1600);
             }
-        };
 
+        })
 
-        await html2pdf()
-            .set(options)
-            .from(pdfContent)
-            .save();
+        .catch((error) => {
 
+            console.error(
+                "PDF error:",
+                error
+            );
 
-    } catch (error) {
+            if (downloadBtn) {
 
-        console.error(
-            "PDF generation failed:",
-            error
-        );
+                downloadBtn.textContent =
+                    oldText;
 
-        showError(
-            "Could not generate the PDF."
-        );
+                downloadBtn.disabled =
+                    false;
+            }
 
-    } finally {
-
-        if (downloadBtn) {
-
-            downloadBtn.textContent =
-                oldText;
-
-            downloadBtn.disabled = false;
-        }
-    }
+            showError(
+                "Could not download PDF."
+            );
+        });
 }
 
 
 /* =========================================================
-   NEW TRIP
-   ========================================================= */
-
-function newTrip() {
-
-    currentThreadId = null;
-
-    latestAnswerMarkdown = "";
-    latestBackendData = null;
-
-    localStorage.removeItem(
-        "travel_thread_id"
-    );
-
-
-    const input = $("userInput");
-
-    if (input) {
-        input.value = "";
-        input.focus();
-    }
-
-
-    const resultSection =
-        $("resultSection");
-
-    if (resultSection) {
-        resultSection.classList.add("hidden");
-    }
-
-
-    const backendDetails =
-        $("backendDetails");
-
-    if (backendDetails) {
-        backendDetails.innerHTML = "";
-    }
-
-
-    hideError();
-
-    updateCharacterCount();
-}
-
-
-/* =========================================================
-   CHARACTER COUNTER
-   ========================================================= */
-
-function updateCharacterCount() {
-
-    const input = $("userInput");
-
-    if (!input) return;
-
-    const counter =
-        document.getElementById(
-            "characterCount"
-        );
-
-    if (!counter) return;
-
-    const length =
-        input.value.length;
-
-    counter.textContent =
-        `${length} characters`;
-}
-
-
-/* =========================================================
-   KEYBOARD
+   KEYBOARD SHORTCUTS
    ========================================================= */
 
 document.addEventListener(
@@ -1300,63 +1039,19 @@ document.addEventListener(
     function (event) {
 
         /*
-         * Ctrl + Enter / Cmd + Enter
+         * Ctrl + Enter
+         * or
+         * Cmd + Enter on Mac
          */
 
         if (
-            (event.ctrlKey ||
-                event.metaKey) &&
+            (event.ctrlKey || event.metaKey) &&
             event.key === "Enter"
         ) {
 
             event.preventDefault();
 
             sendMessage();
-        }
-    }
-);
-
-
-/* =========================================================
-   INPUT EVENTS
-   ========================================================= */
-
-document.addEventListener(
-    "input",
-    function (event) {
-
-        if (
-            event.target &&
-            event.target.id === "userInput"
-        ) {
-
-            updateCharacterCount();
-        }
-    }
-);
-
-
-/* =========================================================
-   CLICK HANDLING
-   ========================================================= */
-
-document.addEventListener(
-    "click",
-    function (event) {
-
-        const promptButton =
-            event.target.closest(
-                "[data-prompt]"
-            );
-
-        if (promptButton) {
-
-            const prompt =
-                promptButton.dataset.prompt;
-
-            if (prompt) {
-                setPrompt(prompt);
-            }
         }
     }
 );
@@ -1370,15 +1065,19 @@ document.addEventListener(
     "DOMContentLoaded",
     function () {
 
-        updateCharacterCount();
+        const input =
+            document.getElementById(
+                "userInput"
+            );
+
 
         /*
-         * Make the Enter key submit the request
-         * only when it is not being used for a newline.
+         * Enter submits.
+         * Shift + Enter creates a new line.
+         *
+         * Remove this section if you want
+         * Enter to always create a new line.
          */
-
-        const input =
-            $("userInput");
 
         if (input) {
 
@@ -1393,11 +1092,6 @@ document.addEventListener(
                         !event.metaKey
                     ) {
 
-                        /*
-                         * On desktop, Enter submits.
-                         * Shift+Enter creates a newline.
-                         */
-
                         event.preventDefault();
 
                         sendMessage();
@@ -1408,87 +1102,22 @@ document.addEventListener(
 
 
         /*
-         * Restore thread information if an
-         * existing conversation exists.
+         * If an old thread exists,
+         * keep it available for continuation.
          */
 
         if (currentThreadId) {
 
             const threadInfo =
-                $("threadInfo");
+                document.getElementById(
+                    "threadInfo"
+                );
 
             if (threadInfo) {
 
-                threadInfo.innerHTML = `
-                    <span class="thread-label">
-                        Existing conversation
-                    </span>
-
-                    <span class="thread-id">
-                        ${escapeHtml(
-                    currentThreadId
-                )}
-                    </span>
-                `;
+                threadInfo.textContent =
+                    `Thread ID: ${currentThreadId}`;
             }
-        }
-
-
-        /*
-         * Allow an optional "New Trip" button
-         * to work without changing HTML.
-         */
-
-        const newTripButton =
-            document.getElementById(
-                "newTripBtn"
-            );
-
-        if (newTripButton) {
-
-            newTripButton.addEventListener(
-                "click",
-                newTrip
-            );
-        }
-
-
-        /*
-         * Make sure result section is hidden
-         * on initial page load.
-         */
-
-        const resultSection =
-            $("resultSection");
-
-        if (
-            resultSection &&
-            !latestAnswerMarkdown
-        ) {
-            resultSection.classList.add(
-                "hidden"
-            );
         }
     }
 );
-
-
-/* =========================================================
-   GLOBAL API
-   ========================================================= */
-
-window.TripMateUI = {
-
-    sendMessage,
-    setPrompt,
-    copyResult,
-    downloadPDF,
-    newTrip,
-    resumeTravel,
-
-    getThreadId: () =>
-        currentThreadId,
-
-    getLatestResponse: () =>
-        latestBackendData
-};
